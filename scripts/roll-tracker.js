@@ -787,7 +787,7 @@ class RollTrackerDialog extends HandlebarsApplicationMixin(ApplicationV2) {
         super({ id: `${RollTracker.ID}-${userId}`, ...options })
         this.userId = userId
         // Which set of rolls is displayed: 'sorted' (all rolls) or 'combat'
-        this.state = 'sorted'
+        this.rollState = 'sorted'
     }
 
     // Bring an already open dialog for this user to the front instead of opening a second one
@@ -836,7 +836,7 @@ class RollTrackerDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     }
 
     async _prepareContext(options) {
-        return RollTrackerDialog.prepRollData(this.userId, this.state)
+        return RollTrackerDialog.prepRollData(this.userId, this.rollState)
     }
 
     // prepTrackedRolls returns the mode as an array so that it can continue to generate raw data which
@@ -870,13 +870,13 @@ class RollTrackerDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     }
 
     static async #onPrint(event, target) {
-        const rollData = await RollTrackerDialog.prepRollData(this.userId, this.state)
+        const rollData = await RollTrackerDialog.prepRollData(this.userId, this.rollState)
         const content = await renderTemplate(RollTracker.TEMPLATES.CHATMSG, rollData)
         ChatMessage.create( { content } )
     }
 
     static #onToggle(event, target) {
-        this.state = this.state === 'sorted' ? 'combat' : 'sorted'
+        this.rollState = this.rollState === 'sorted' ? 'combat' : 'sorted'
         this.render()
     }
 
@@ -889,6 +889,6 @@ class RollTrackerDialog extends HandlebarsApplicationMixin(ApplicationV2) {
     }
 
     static #onCompare(event, target) {
-        this.prepCompCard(this.state)
+        this.prepCompCard(this.rollState)
     }
 }
