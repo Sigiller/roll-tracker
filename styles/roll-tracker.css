@@ -1,6 +1,6 @@
 .roll-tracker-item-button {
     background: transparent;
-    color: white;
+    color: inherit;
     border: 0;
     padding: 0;
     line-height: 0;
@@ -15,6 +15,20 @@
 .roll-tracker-item-button:hover, .roll-tracker-item-button:focus {
     box-shadow: none;
     text-shadow: 0 0 5px red;
+}
+
+/* Roll Tracker dialog (ApplicationV2) */
+.application.roll-tracker .roll-tracker-form.flexcol {
+    gap: 0.25rem;
+}
+
+.application.roll-tracker ul.roll-tracker-form {
+    margin: 0 0 0.5rem;
+    padding-left: 1.25em;
+}
+
+.application.roll-tracker .roll-tracker-form button {
+    justify-content: center;
 }
 
 .roll-tracker-form-heading {

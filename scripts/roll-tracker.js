@@ -11,6 +11,9 @@
  * AN ENDLESS LOOP IF THE 'ELSE' OF THE FIRST CONDITIONAL JUST RUNS THE FUNCTION AGAIN?
  */
 
+const { ApplicationV2, HandlebarsApplicationMixin, DialogV2 } = foundry.applications.api
+const { renderTemplate } = foundry.applications.handlebars
+
 // Whenever a chat message is created, check if it contains a roll. If so, parse it to determine
 // whether it should be tracked, according to our module settings
 Hooks.on('createChatMessage', (chatMessage) => {
@@ -29,12 +32,19 @@ Hooks.on('renderPlayers', (app, element, context, options) => {
     const insertRollTrackerButton = (userId) => {
         const buttonPlacement = element.querySelector(`[data-user-id="${userId}"]`)
         if (!buttonPlacement) return;
-        if (buttonPlacement.querySelector(`.roll-tracker-item-button[id="${userId}"]`)) return;
-        buttonPlacement.insertAdjacentHTML(
-            'beforeend',
-            `<button type="button" title='${tooltip}' class="roll-tracker-item-button flex0" id="${userId}"><i class="fas fa-dice-d20"></i></button>`
-        )
-        element.querySelector(`button[id="${userId}"]`).addEventListener('click', () => new RollTrackerDialog(userId).render(true));
+        if (buttonPlacement.querySelector('.roll-tracker-item-button')) return;
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'roll-tracker-item-button flex0'
+        button.dataset.tooltip = tooltip
+        button.setAttribute('aria-label', tooltip)
+        button.innerHTML = '<i class="fas fa-dice-d20"></i>'
+        button.addEventListener('click', (event) => {
+            // Don't let the click bubble up to the player list entry
+            event.stopPropagation()
+            RollTrackerDialog.open(userId)
+        })
+        buttonPlacement.append(button)
     }
 
     if (game.user.isGM) {
@@ -214,7 +224,7 @@ class RollTracker {
         // Are streaks completely disabled, are they shown only to GMs, or are they shown to everyone
         game.settings.register(this.ID, this.SETTINGS.STREAK_BEHAVIOUR, {
             name: `ROLL-TRACKER.settings.${this.SETTINGS.STREAK_BEHAVIOUR}.Name`,
-            default: true,
+            default: 'hidden',
             type: String,
             scope: 'world',
             config: true,
@@ -230,7 +240,7 @@ class RollTracker {
         // a streak?
         game.settings.register(this.ID, this.SETTINGS.STREAK_THRESHOLD, {
             name: `ROLL-TRACKER.settings.${this.SETTINGS.STREAK_THRESHOLD}.Name`,
-            default: true,
+            default: 3,
             type: Number,
             range: {
                 min: 2,
@@ -278,7 +288,7 @@ class RollTracker {
         const isBlind = chatMessage.blind
         const rollRequirements = {
             isd20: chatMessage.rolls[0]?.dice[0]?.faces === 20,
-            blindCheck: (!isBlind) || (isBlind && game.settings.get(this.ID, this.SETTINGS.COUNT_HIDDEN)) || (isBlind && chatMessage.rolls[0]?.roller.isGM),
+            blindCheck: (!isBlind) || game.settings.get(this.ID, this.SETTINGS.COUNT_HIDDEN) || !!chatMessage.author?.isGM,
         }
         switch (system) {
             case 'dnd5e':
@@ -305,7 +315,7 @@ class RollTracker {
         })            
         if (chatMessage.isContentVisible) await RollTrackerHelper.waitFor3DDiceMessage(chatMessage.id)
         if (checksPassed) {
-            RollTrackerData.createTrackedRoll(chatMessage.user, chatMessage.rolls[0], isBlind)
+            RollTrackerData.createTrackedRoll(chatMessage.author, chatMessage.rolls[0], isBlind)
         }
     }
 }
@@ -350,7 +360,7 @@ class RollTrackerData {
     }
 
     static createTrackedRoll(user, rollData, isBlind) {
-        if (game.userId === user.id) {
+        if (user && game.userId === user.id) {
         // this check is necessary because (I think) every instance of foundry currently running tries
         // to create and update these rolls. Players, however, do not have permission to edit the data
         // of other users, so errors are thrown. This way the only foundry instance that creates the tracked
@@ -772,40 +782,69 @@ class RollTrackerData {
     }
 }
 
-class RollTrackerDialog extends FormApplication {
-    constructor(userId, options={}) {  
-    // the first argument is the object, the second are the options
-        super(userId, options)
+class RollTrackerDialog extends HandlebarsApplicationMixin(ApplicationV2) {
+    constructor(userId, options={}) {
+        super({ id: `${RollTracker.ID}-${userId}`, ...options })
+        this.userId = userId
+        // Which set of rolls is displayed: 'sorted' (all rolls) or 'combat'
+        this.state = 'sorted'
     }
 
-    static get defaultOptions() {
-        const defaults = super.defaultOptions
-        const overrides = {
-            height: 'auto',
-            id: 'roll-tracker',
-            template: RollTracker.TEMPLATES.ROLLTRACK,
+    // Bring an already open dialog for this user to the front instead of opening a second one
+    static open(userId) {
+        const existing = foundry.applications.instances.get(`${RollTracker.ID}-${userId}`)
+        if (existing) return existing.render({ force: true })
+        return new this(userId).render({ force: true })
+    }
+
+    static DEFAULT_OPTIONS = {
+        classes: [RollTracker.ID],
+        window: {
             title: 'Roll Tracker',
-            state: 'sorted'
+            icon: 'fas fa-dice-d20',
+            controls: [
+                {
+                    icon: 'fas fa-download',
+                    label: 'ROLL-TRACKER.form-button.download',
+                    action: 'export'
+                },
+                {
+                    icon: 'fas fa-chart-simple',
+                    label: 'ROLL-TRACKER.comparison-card.title',
+                    action: 'compare',
+                    visible: () => game.user.isGM
+                }
+            ]
+        },
+        position: {
+            width: 320,
+            height: 'auto'
+        },
+        actions: {
+            clear: RollTrackerDialog.#onClear,
+            print: RollTrackerDialog.#onPrint,
+            toggle: RollTrackerDialog.#onToggle,
+            export: RollTrackerDialog.#onExport,
+            compare: RollTrackerDialog.#onCompare
         }
-        const mergedOptions = foundry.utils.mergeObject(defaults, overrides);
-        return mergedOptions
     }
 
-    async getData(options) {
-        const state = options.state
-        console.log(state)
-        const rollData = await RollTrackerData.prepTrackedRolls(this.object, state)
+    static PARTS = {
+        main: {
+            template: RollTracker.TEMPLATES.ROLLTRACK
+        }
+    }
 
-        // The lines below convert the mode array returned from prepTrackedRolls into a prettier 
-        // string for display purposes. We choose to do the conversion to string here so that the
-        // prepTrackedRolls func can continue to generate raw data which can be more easily 
-        // read/compared/manipulated, as in generalComparison()
-        
-        const modeString = rollData.stats.mode.join(', ')
-        // const modeString_averages = rollData.averages.mode.join(', ')
-        rollData.stats.mode = modeString
-        // rollData.averages.mode = modeString_averages
+    async _prepareContext(options) {
+        return RollTrackerDialog.prepRollData(this.userId, this.state)
+    }
 
+    // prepTrackedRolls returns the mode as an array so that it can continue to generate raw data which
+    // can be more easily read/compared/manipulated, as in generalComparison(). Here we add a prettier
+    // string version of it for display purposes.
+    static async prepRollData(userId, state) {
+        const rollData = await RollTrackerData.prepTrackedRolls(userId, state)
+        rollData.stats.modeString = rollData.stats.mode.join(', ')
         return rollData
     }
 
@@ -815,84 +854,41 @@ class RollTrackerDialog extends FormApplication {
         ChatMessage.create( { content } )
     }
 
-    activateListeners(html) {
-        super.activateListeners(html);
-
-        // With the below function, we are specifying that for the _handleButtonClick function, 
-        // the keyword 'this' will refer to the current value of this as used in the bind function
-        // i.e. RollTrackerDialog
-        html.on('click', "[data-action]", this._handleButtonClick.bind(this))
-    }
-
-    async _handleButtonClick(event) {
-        const clickedElement = $(event.currentTarget)
-        const action = clickedElement.data().action
-        const userId = clickedElement.parents(`[data-userId]`)?.data().userid
-        switch (action) {
-            case 'clear': {
-                const confirmed = await Dialog.confirm({
-                    title: game.i18n.localize("ROLL-TRACKER.confirms.clear_rolls.title"),
-                    content: game.i18n.localize("ROLL-TRACKER.confirms.clear_rolls.content"),
-                })
-                if (confirmed) {
-                    await RollTrackerData.clearTrackedRolls(userId)
-                    this.render();
-                }
-                break
-            } case 'print': {
-                const rollData = await RollTrackerData.prepTrackedRolls(this.object, this.options.state)
-                const modeString = rollData.stats.mode.join(', ')
-                rollData.stats.mode = modeString
-
-                const content = await renderTemplate(RollTracker.TEMPLATES.CHATMSG, rollData)
-                ChatMessage.create( { content } )
-                break
-            } 
-            case 'toggle': {
-                if (this.options.state === 'sorted') {
-                    this.render(false, {state: 'combat'})
-                } else {
-                    this.render(false, {state: 'sorted'})
-                }
-                // const rollData = await RollTrackerData.prepTrackedRolls(this.object, 'combat')
-                // const modeString = rollData.stats.mode.join(', ')
-                // rollData.stats.mode = modeString
-
-                // const content = await renderTemplate(RollTracker.TEMPLATES.CHATMSG, rollData)
-                // ChatMessage.create( { content } )
-                break
-            }
-        }
-    }
-
     get exportData() {
         return RollTrackerData.getUserRolls(game.userId)?.export
     }
 
-    // This function gets the header data from FormApplication but modifies it to add our export button
-    _getHeaderButtons() {
-        let buttons = super._getHeaderButtons();
-        buttons.splice(0, 0, {
-            class: "roll-tracker-form-export",
-            icon: "fas fa-download",
-            onclick: ev => {
-                if (this.exportData) {
-                    saveDataToFile(this.exportData, 'string', 'roll-data.txt')
-                } else {
-                    return ui.notifications.warn("No roll data to export")
-                }
-            }
+    static async #onClear(event, target) {
+        const confirmed = await DialogV2.confirm({
+            window: { title: game.i18n.localize("ROLL-TRACKER.confirms.clear_rolls.title") },
+            content: `<p>${game.i18n.localize("ROLL-TRACKER.confirms.clear_rolls.content")}</p>`
         })
-        if (game.user.isGM) {
-            buttons.splice(1, 0, {
-                class: "roll-tracker-form-comparison",
-                icon: "fas fa-chart-simple",
-                onclick: ev => {
-                    this.prepCompCard(this.options.state)
-                }
-            })
+        if (confirmed) {
+            await RollTrackerData.clearTrackedRolls(this.userId)
+            this.render()
         }
-        return buttons
     }
 
+    static async #onPrint(event, target) {
+        const rollData = await RollTrackerDialog.prepRollData(this.userId, this.state)
+        const content = await renderTemplate(RollTracker.TEMPLATES.CHATMSG, rollData)
+        ChatMessage.create( { content } )
+    }
+
+    static #onToggle(event, target) {
+        this.state = this.state === 'sorted' ? 'combat' : 'sorted'
+        this.render()
+    }
+
+    static #onExport(event, target) {
+        if (this.exportData) {
+            foundry.utils.saveDataToFile(this.exportData, 'text/plain', 'roll-data.txt')
+        } else {
+            ui.notifications.warn("No roll data to export")
+        }
+    }
+
+    static #onCompare(event, target) {
+        this.prepCompCard(this.state)
+    }
 }
