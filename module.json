@@ -1,8 +1,8 @@
 {
   "id": "roll-tracker",
   "title": "Roll Tracker",
-  "description": "A simple module which tracks the d20 rolls made and logs them by each user.",
-  "version": "2.1.0",
+  "description": "<p>Tracks the d20 rolls each user makes and shows their statistics: mean, median, mode, natural 1s and 20s, streaks, and a GM comparison card.</p>",
+  "version": "3.0.0",
   "authors": [
     {
       "name": "drexl93",
@@ -15,16 +15,13 @@
     }
   ],
   "esmodules": [
-    "scripts/roll-tracker.js"
-  ],
-  "styles": [
-    "styles/roll-tracker.css"
+    "dist/main.js"
   ],
   "languages": [
     {
       "lang": "en",
       "name": "English",
-      "path": "languages/en.json",
+      "path": "lang/en.json",
       "flags": {}
     }
   ],

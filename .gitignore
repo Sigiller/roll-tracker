@@ -1,3 +1,6 @@
-roll-tracker.lock
-staging/
+node_modules/
 dist/
+staging/
+*.log
+.DS_Store
+roll-tracker.lock
